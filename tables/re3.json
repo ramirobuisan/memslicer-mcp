@@ -7,16 +7,16 @@
       "type": "int32",
       "value": 15,
       "freeze": true,
-      "address": "find([[[re3.exe+0x8C6F648]+0xC0]+0x7F0], 0x1800, \"00 00 00 00 01 00 00 00 ?? ?? ?? ?? 1F 00 00 00\")+0x10",
-      "notes": "G19 handgun (weapon 1, ammo type 31). Follows the weapon's inventory slot by ID. Inventory chain not yet confirmed across a save reload."
+      "address": "first(20, \"[[[[[re3.exe+0x8C6F648]+0xC0]+0x750]+0x20+$i*8]+0x10]+0x10\", \"00 00 00 00 01 00 00 00 ?? ?? ?? ?? 1F 00 00 00\")+0x10",
+      "notes": "G19 handgun: weapon 1, ammo type 31. Walks Jill's 20 inventory slots ([[re3.exe+0x8C6F648]+0xC0] -> +0x750 slot array) and picks the slot whose item has this weapon/ammo ID, so it survives rearranging and the game rebuilding the inventory."
     },
     {
       "name": "Infinite shotgun shells",
       "type": "int32",
       "value": 6,
       "freeze": true,
-      "address": "find([[[re3.exe+0x8C6F648]+0xC0]+0x7F0], 0x1800, \"00 00 00 00 0B 00 00 00 ?? ?? ?? ?? 20 00 00 00\")+0x10",
-      "notes": "M3 shotgun (weapon 11, ammo type 32). Same inventory chain as the handgun."
+      "address": "first(20, \"[[[[[re3.exe+0x8C6F648]+0xC0]+0x750]+0x20+$i*8]+0x10]+0x10\", \"00 00 00 00 0B 00 00 00 ?? ?? ?? ?? 20 00 00 00\")+0x10",
+      "notes": "M3 shotgun: weapon 11, ammo type 32. Walks Jill's 20 inventory slots ([[re3.exe+0x8C6F648]+0xC0] -> +0x750 slot array) and picks the slot whose item has this weapon/ammo ID, so it survives rearranging and the game rebuilding the inventory."
     }
   ],
   "pointer_size": 8

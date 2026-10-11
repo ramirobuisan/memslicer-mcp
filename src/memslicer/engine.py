@@ -86,6 +86,7 @@ class Session:
         self._undo: list[ScanState] = []
         self.chains: list[pointers.Chain] = []
         self._aob_cache: dict[tuple[str, str | None], int] = {}
+        self._first_cache: dict[tuple[str, str], int] = {}
 
     def close(self) -> None:
         self.task.close()
@@ -135,7 +136,7 @@ class Session:
     def read_uint(self, addr: int, size: int) -> int:
         return int.from_bytes(self.task.read(addr, size), "little")
 
-    def eval_address(self, text, pointer_size: int | None = None) -> int:
+    def eval_address(self, text, pointer_size: int | None = None, variables: dict | None = None) -> int:
         if isinstance(text, int):
             return text
         ps = pointer_size or self.default_pointer_size()
@@ -149,8 +150,30 @@ class Session:
         def read_i32(a):
             return int.from_bytes(self.task.read(a, 4), "little", signed=True)
 
+        def first(count, sub, pattern):
+            return self._first_match(count, sub, pattern, ps)
+
         return expr_mod.evaluate(text, module_base=module_base, read_ptr=lambda a: self.read_uint(a, ps),
-                                 aob=self._aob_first, read_i32=read_i32, find=self._find_in)
+                                 aob=self._aob_first, read_i32=read_i32, find=self._find_in, first=first,
+                                 variables=variables)
+
+    def _first_match(self, count: int, sub: str, pattern: str, ps: int) -> int:
+        if not 0 < count <= 4096:
+            raise ScanError("first() count must be between 1 and 4096")
+        rx, size = byte_pattern(ValueType("bytes"), pattern)
+        key = (sub, pattern)
+        cached = self._first_cache.get(key)
+        order = ([cached] if cached is not None and cached < count else []) + \
+            [i for i in range(count) if i != cached]
+        for i in order:
+            try:
+                addr = self.eval_address(sub, ps, {"$i": i})
+                if rx.fullmatch(self.task.read(addr, size)):
+                    self._first_cache[key] = i
+                    return addr
+            except (MachError, expr_mod.ExprError, ScanError):
+                continue
+        raise ScanError(f"first(): no element 0..{count - 1} matches {pattern}")
 
     def _find_in(self, start: int, length: int, pattern: str) -> int:
         if not 0 < length <= 1 << 24:

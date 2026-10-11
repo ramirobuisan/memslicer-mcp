@@ -83,3 +83,22 @@ def test_find_follows_an_item_inside_an_array():
                     find=find)
     assert addr == 0x1000 + 0x40 + 0x10
     assert uses_memory('find(1, 2, "00")')
+
+
+def test_first_walks_an_array_of_pointers():
+    # array of 3 slot pointers at 0x9000; slot 2 holds the shotgun (weapon 11)
+    mem = {0x9000: 0xA000, 0x9008: 0xB000, 0x9010: 0xC000}
+    weapons = {0xA000: 1, 0xB000: -1, 0xC000: 11}
+
+    def first(count, sub, pattern):
+        for i in range(count):
+            addr = evaluate(sub, module_base=lambda n: None, read_ptr=lambda a: mem[a], aob=None,
+                            read_i32=None, variables={"$i": i})
+            if weapons[addr] == int(pattern):
+                return addr
+        raise LookupError
+
+    addr = evaluate('first(3, "[0x9000+$i*8]", "11")+0x20', module_base=lambda n: None,
+                    read_ptr=lambda a: mem[a], aob=None, read_i32=None, first=first)
+    assert addr == 0xC020
+    assert uses_memory('first(3, "x", "y")')
