@@ -67,3 +67,19 @@ def test_offsets_never_trigger_module_lookups():
     evaluate("[[Game.exe+0x10]+0x8]+0x48", module_base=module_base, read_ptr=lambda a: MEMORY[a],
              aob=lambda p, m: 0, read_i32=lambda a: 0)
     assert asked == ["Game.exe"]
+
+
+def test_find_follows_an_item_inside_an_array():
+    inventory = bytes(0x40) + bytes.fromhex("000000000B0000000000000020000000") + (6).to_bytes(4, "little")
+
+    def find(start, length, pattern):
+        import re
+        rx = re.compile(b"".join(b"." if t == "??" else re.escape(bytes([int(t, 16)])) for t in pattern.split()),
+                        re.DOTALL)
+        return start + rx.search(inventory[:length]).start()
+
+    addr = evaluate('find(1000, 0x100, "00 00 00 00 0B 00 00 00 ?? ?? ?? ?? 20 00 00 00")+0x10',
+                    module_base=lambda n: None, read_ptr=lambda a: 0, aob=lambda p, m: 0, read_i32=lambda a: 0,
+                    find=find)
+    assert addr == 0x1000 + 0x40 + 0x10
+    assert uses_memory('find(1, 2, "00")')

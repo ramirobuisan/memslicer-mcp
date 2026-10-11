@@ -7,6 +7,9 @@
     $exe+0x10             base of the main executable
     aob("48 8B 05 ?? ?? ?? ??", "Game.exe")   first match of a byte pattern
     rip(aob("48 8B 05 ?? ?? ?? ??")+3)        resolve a RIP-relative disp32 at that address
+    find([[Game.exe+0x10]+8], 0x1000, "0B 00 00 00 ?? ?? ?? ?? 20 00 00 00")
+                          first match of a pattern inside [start, start+length): follows an
+                          item by its ID inside an array (inventories that get rearranged)
 """
 
 from __future__ import annotations
@@ -50,7 +53,7 @@ def _tokenize(text: str) -> list[tuple[str, str]]:
 
 
 class _Parser:
-    def __init__(self, text, module_base, read_ptr, aob, read_i32):
+    def __init__(self, text, module_base, read_ptr, aob, read_i32, find=None):
         self.text = text
         self.tokens = _tokenize(text)
         self.i = 0
@@ -58,6 +61,7 @@ class _Parser:
         self.read_ptr = read_ptr
         self.aob = aob
         self.read_i32 = read_i32
+        self.find = find
 
     def peek(self):
         return self.tokens[self.i][1] if self.i < len(self.tokens) else None
@@ -143,6 +147,18 @@ class _Parser:
                 module = module.strip("\"'")
             self.expect(")")
             return self.aob(pattern[1:-1], module)
+        if fn == "find":
+            start = self.sum()
+            self.expect(",")
+            length = self.sum()
+            self.expect(",")
+            kind, pattern = self.take()
+            if kind != "str":
+                raise ExprError('find(start, length, "pattern") takes a quoted pattern')
+            self.expect(")")
+            if self.find is None:
+                raise ExprError("find() is not available here")
+            return self.find(start, length, pattern[1:-1])
         if fn == "rip":
             addr = self.sum()
             self.expect(")")
@@ -151,12 +167,14 @@ class _Parser:
 
 
 def evaluate(text: str, *, module_base: Callable[[str], int | None], read_ptr: Callable[[int], int],
-             aob: Callable[[str, str | None], int], read_i32: Callable[[int], int]) -> int:
+             aob: Callable[[str, str | None], int], read_i32: Callable[[int], int],
+             find: Callable[[int, int, str], int] | None = None) -> int:
     if not text or not str(text).strip():
         raise ExprError("empty address")
-    return _Parser(str(text), module_base, read_ptr, aob, read_i32).parse()
+    return _Parser(str(text), module_base, read_ptr, aob, read_i32, find).parse()
 
 
 def uses_memory(text: str) -> bool:
     """True if evaluating needs to read memory every time (pointer derefs)."""
-    return "[" in str(text) or "rip(" in str(text).lower()
+    t = str(text).lower()
+    return "[" in t or "rip(" in t or "find(" in t

@@ -150,7 +150,17 @@ class Session:
             return int.from_bytes(self.task.read(a, 4), "little", signed=True)
 
         return expr_mod.evaluate(text, module_base=module_base, read_ptr=lambda a: self.read_uint(a, ps),
-                                 aob=self._aob_first, read_i32=read_i32)
+                                 aob=self._aob_first, read_i32=read_i32, find=self._find_in)
+
+    def _find_in(self, start: int, length: int, pattern: str) -> int:
+        if not 0 < length <= 1 << 24:
+            raise ScanError("find() length must be between 1 byte and 16 MiB")
+        rx, _ = byte_pattern(ValueType("bytes"), pattern)
+        buf, page_ok = self.task.read_robust(start, length)
+        for m in rx.finditer(memoryview(buf)):
+            if page_ok is None or _pages_ok(start, np.array([m.start()]), m.end() - m.start(), page_ok)[0]:
+                return start + m.start()
+        raise ScanError(f"find(): pattern not found in 0x{start:X}..0x{start + length:X}")
 
     def _aob_first(self, pattern: str, module: str | None) -> int:
         key = (pattern, module)
