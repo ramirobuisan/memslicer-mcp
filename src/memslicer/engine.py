@@ -283,18 +283,31 @@ class Session:
         return state
 
     def _snapshot(self, vt, spans, alignment) -> ScanState:
-        total = sum(hi - lo for lo, hi in spans)
-        if total > SNAPSHOT_MAX:
-            raise ScanError(f"unknown-value scan would snapshot {total / 2**30:.1f} GiB (limit "
-                            f"{SNAPSHOT_MAX / 2**30:.0f} GiB); restrict it with module= or start/end, "
-                            "or raise MEMSLICER_SNAPSHOT_MAX")
+        """Unknown-initial-value scan. Pages that are entirely zero are not stored (most committed game memory is
+        untouched), so a value that is 0 right now won't be found by later relative scans."""
         align = alignment or vt.default_alignment
         snap = []
-        positions = 0
+        positions = stored = 0
         for lo, hi in spans:
             for pos, buf, nominal, page_ok in self._chunks(lo, hi, 0):
-                snap.append((pos, buf, page_ok))
-                positions += len(buf) // align
+                if pos % MIN_PAGE or len(buf) % MIN_PAGE:
+                    snap.append((pos, buf, None, page_ok))  # unaligned span edge: keep it dense
+                    kept = len(buf)
+                else:
+                    pages = buf.reshape(-1, MIN_PAGE)
+                    keep = pages.any(axis=1)
+                    if page_ok is not None:
+                        keep &= page_ok
+                    idx = np.flatnonzero(keep).astype(np.int64)
+                    if not idx.size:
+                        continue
+                    snap.append((pos, pages[idx].copy(), idx, len(buf)))
+                    kept = idx.size * MIN_PAGE
+                positions += kept // align
+                stored += kept
+                if stored > SNAPSHOT_MAX:
+                    raise ScanError(f"unknown-value snapshot passed {SNAPSHOT_MAX / 2**30:.0f} GiB; restrict it with "
+                                    "module= or start/end, or raise MEMSLICER_SNAPSHOT_MAX")
         return ScanState(vt, vt.size, np.empty(0, np.uint64), np.empty((0, vt.size), np.uint8), align,
                          snapshot=snap, snapshot_positions=positions)
 
@@ -336,23 +349,40 @@ class Session:
         if op in ABSOLUTE_OPS:
             parse_number(vt, v1)
         addr_parts, raw_parts = [], []
-        for pos, old, old_ok in st.snapshot:
-            cur, cur_ok = self.task.read_robust(pos, len(old))
+
+        def collect(a_cur, a_old, base_rel, ok):
+            mask = compare(vt, a_cur, op, v1, v2, prev=a_old, tolerance=tol)
+            if ok is not None:
+                mask &= ok
+            hit = np.flatnonzero(mask)
+            if hit.size:
+                addr_parts.append(np.uint64(pos) + base_rel[hit].astype(np.uint64))
+                raw_parts.append(np.ascontiguousarray(a_cur[hit]).view(np.uint8).reshape(-1, size))
+
+        for pos, old, idx, extra in st.snapshot:
+            if idx is None:  # dense chunk; extra is page_ok at snapshot time
+                cur, cur_ok = self.task.read_robust(pos, len(old))
+                for k in range(size // align):
+                    off = k * align
+                    n = (len(old) - off) // size
+                    if n <= 0:
+                        continue
+                    rel = off + np.arange(n, dtype=np.int64) * size
+                    ok = _pages_ok(pos, rel, size, extra) & _pages_ok(pos, rel, size, cur_ok)
+                    collect(np.frombuffer(cur, vt.dtype, n, off), np.frombuffer(old, vt.dtype, n, off), rel, ok)
+                continue
+            # sparse chunk: old holds only the kept pages; extra is the chunk length
+            cur, cur_ok = self.task.read_robust(pos, extra)
+            cur_pages = cur.reshape(-1, MIN_PAGE)[idx]
+            row_ok = cur_ok[idx] if cur_ok is not None else None
             for k in range(size // align):
                 off = k * align
-                n = (len(old) - off) // size
-                if n <= 0:
-                    continue
-                a_old = np.frombuffer(old, dtype=vt.dtype, count=n, offset=off)
-                a_cur = np.frombuffer(cur, dtype=vt.dtype, count=n, offset=off)
-                idx = np.flatnonzero(compare(vt, a_cur, op, v1, v2, prev=a_old, tolerance=tol))
-                if not idx.size:
-                    continue
-                rel = off + idx.astype(np.int64) * size
-                keep = _pages_ok(pos, rel, size, old_ok) & _pages_ok(pos, rel, size, cur_ok)
-                idx, rel = idx[keep], rel[keep]
-                addr_parts.append(np.uint64(pos) + rel.astype(np.uint64))
-                raw_parts.append(np.ascontiguousarray(a_cur[idx]).view(np.uint8).reshape(-1, size))
+                n = (MIN_PAGE - off) // size  # values never straddle a page here
+                a_old = np.ascontiguousarray(old[:, off:off + n * size]).view(vt.dtype)
+                a_cur = np.ascontiguousarray(cur_pages[:, off:off + n * size]).view(vt.dtype)
+                rel = (idx[:, None] * MIN_PAGE + off + np.arange(n, dtype=np.int64) * size).reshape(-1)
+                ok = np.repeat(row_ok, n) if row_ok is not None else None
+                collect(a_cur.reshape(-1), a_old.reshape(-1), rel, ok)
         return self._make_state(vt, size, align, addr_parts, raw_parts)
 
     def _next_bytes(self, st: ScanState, op, value) -> ScanState:
@@ -472,7 +502,8 @@ class Session:
 
     def pointer_scan(self, target, max_depth: int = 4, max_offset: int = 0x1000, pointer_size: int | None = None,
                      modules: list[str] | None = None, max_results: int = 200,
-                     static_ranges: list[tuple[int, int, str, int]] | None = None) -> dict:
+                     static_ranges: list[tuple[int, int, str, int]] | None = None,
+                     value_align: int | None = None) -> dict:
         t0 = time.monotonic()
         addr = self.eval_address(target)
         ps = pointer_size or self.default_pointer_size()
@@ -481,7 +512,7 @@ class Session:
                 [m for m in self.modules() if m.kind != "macho"] or self.modules()
             static_ranges = [(m.base, m.end, m.name, m.base) for m in mods]
         spans = self.spans(writable_only=True)
-        paddrs, pvals = pointers.build_pointer_map(self.task, spans, ps)
+        paddrs, pvals = pointers.build_pointer_map(self.task, spans, ps, value_align)
         chains = pointers.find_chains(paddrs, pvals, addr, static_ranges, max_depth=max_depth,
                                       max_offset=max_offset, max_results=max_results)
         self.chains = chains

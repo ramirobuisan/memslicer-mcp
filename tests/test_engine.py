@@ -140,3 +140,18 @@ def test_freezer(session, buf):
 def test_modules_found_for_python(session):
     mods = session.modules()
     assert any(m.kind == "macho" and m.is_exe for m in mods)
+
+
+def test_sparse_snapshot_skips_zero_pages(session):
+    b = tagged_buffer(1 << 20)  # fresh mapping: all zero
+    q = b.view(np.int32)
+    q[5000] = 1200  # one non-zero page
+    s = session.first_scan(parse_type("int32"), "unknown", **span(b))
+    assert len(session.scan.snapshot) == 1 and session.scan.snapshot[0][1].shape == (1, 4096)
+    q[5000] = 950
+    s = session.next_scan("decreased")
+    assert s["results"] == 1 and int(s["preview"][0]["address"], 16) == q[5000:].ctypes.data
+    # an unaligned span edge falls back to a dense snapshot
+    session.first_scan(parse_type("int32"), "unknown", start=b.ctypes.data + 8, end=b.ctypes.data + 4096 * 3)
+    q[3] = 77
+    assert session.next_scan("increased")["results"] == 1

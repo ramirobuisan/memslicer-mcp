@@ -50,9 +50,13 @@ def _in_ranges(vals: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
     return (k >= 0) & (vals < hi[kk])
 
 
-def build_pointer_map(task: Task, spans: list[tuple[int, int]], pointer_size: int) -> tuple[np.ndarray, np.ndarray]:
+def build_pointer_map(task: Task, spans: list[tuple[int, int]], pointer_size: int,
+                      value_align: int | None = None) -> tuple[np.ndarray, np.ndarray]:
     """(pointer locations, pointer values) sorted by value, for every aligned
-    value in `spans` that points back into `spans`."""
+    value in `spans` that points back into `spans`. value_align (default: the
+    pointer size) drops values that aren't aligned like a real heap pointer,
+    which removes most of the random data that merely looks like an address."""
+    value_align = pointer_size if value_align is None else value_align
     lo, hi = _merge(spans)
     if not len(lo):
         return np.empty(0, np.uint64), np.empty(0, np.uint64)
@@ -70,7 +74,10 @@ def build_pointer_map(task: Task, spans: list[tuple[int, int]], pointer_size: in
                 continue
             count = n // pointer_size
             vals = np.frombuffer(buf, dtype=dtype, count=count).astype(np.uint64, copy=False)
-            cand = np.flatnonzero((vals >= vmin) & (vals < vmax))
+            in_range = (vals >= vmin) & (vals < vmax)
+            if value_align > 1:
+                in_range &= (vals % np.uint64(value_align)) == 0
+            cand = np.flatnonzero(in_range)
             if not cand.size:
                 continue
             v = vals[cand]
@@ -130,6 +137,7 @@ def find_chains(paddrs: np.ndarray, pvals: np.ndarray, target: int,
                     name, base = static_of(a)
                     results.append(Chain(name, a - base, new_path))
                     if len(results) >= max_results:
+                        results.sort(key=lambda c: (len(c.offsets), sum(c.offsets)))
                         return results
                 elif a not in seen:
                     seen.add(a)
@@ -144,4 +152,5 @@ def find_chains(paddrs: np.ndarray, pvals: np.ndarray, target: int,
             nxt_paths = [nxt_paths[j] for j in order]
         frontier = np.array(nxt_addrs, dtype=np.uint64)
         paths = nxt_paths
+    results.sort(key=lambda c: (len(c.offsets), sum(c.offsets)))
     return results

@@ -224,11 +224,13 @@ def aob_scan(pattern: str, module: str | None = None, limit: int = 50, executabl
 
 @mcp.tool()
 def pointer_scan(address: str, max_depth: int = 4, max_offset: int = 4096, pointer_size: int | None = None,
-                 modules: list[str] | None = None, max_results: int = 200) -> dict:
+                 modules: list[str] | None = None, max_results: int = 200, value_align: int | None = None) -> dict:
     """Find pointer chains from static module memory to an address. pointer_size defaults to 4 for 32-bit
-    (pe32) games and 8 otherwise. modules limits which images count as static bases (default: all PE modules)."""
+    (pe32) games and 8 otherwise. modules limits which images count as static bases (default: all PE modules;
+    pass the game exe to cut noise). value_align (default = pointer size) ignores misaligned fake pointers;
+    set 1 to disable. Shortest chains come first."""
     return _h("pointer_scan", address=address, max_depth=max_depth, max_offset=max_offset,
-              pointer_size=pointer_size, modules=modules, max_results=max_results)
+              pointer_size=pointer_size, modules=modules, max_results=max_results, value_align=value_align)
 
 
 @mcp.tool()

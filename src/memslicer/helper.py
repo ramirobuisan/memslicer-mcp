@@ -236,9 +236,10 @@ class Api:
     # -- pointers -----------------------------------------------------------
 
     def pointer_scan(self, address, max_depth: int = 4, max_offset: int = 0x1000, pointer_size: int | None = None,
-                     modules: list[str] | None = None, max_results: int = 200) -> dict:
+                     modules: list[str] | None = None, max_results: int = 200,
+                     value_align: int | None = None) -> dict:
         return self._s().pointer_scan(address, int(max_depth), int(max_offset), pointer_size, modules,
-                                      int(max_results))
+                                      int(max_results), value_align=value_align)
 
     def pointer_filter(self, address, pointer_size: int | None = None) -> dict:
         return self._s().pointer_filter(address, pointer_size)
