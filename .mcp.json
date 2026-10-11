@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "memslicer": {
+      "command": "./.venv/bin/memslicer-mcp"
+    }
+  }
+}
