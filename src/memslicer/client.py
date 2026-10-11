@@ -27,12 +27,12 @@ def socket_candidates() -> list[Path]:
 
 
 START_HINT = ("The memslicer helper is not running. Start it in a terminal with:\n"
-              "  sudo \"{root}/.venv/bin/memslicer\" helper\n"
+              "  sudo \"{exe}\" helper\n"
               "(it needs root for task_for_pid; it only serves your user and only attaches to your processes)")
 
 
 def start_hint() -> str:
-    return START_HINT.format(root=Path(sys.executable).parent.parent)
+    return START_HINT.format(exe=Path(sys.executable).parent / "memslicer")
 
 
 class HelperClient:
