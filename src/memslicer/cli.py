@@ -7,7 +7,7 @@ import json
 import os
 import sys
 
-from . import procs, tables
+from . import procs, tables, wine
 from .client import HelperClient, HelperError, HelperUnavailable
 
 USAGE = """\
@@ -19,6 +19,8 @@ memslicer diagnose PID             can this process be attached?
 memslicer tables                   list cheat tables
 memslicer apply TABLE [-p MATCH] [--only NAME ...]
                                    attach and apply a cheat table (freezes keep running in the helper)
+memslicer wine-agent GAME|PID      start the Wine agent in a CrossOver/NotProton game's prefix
+memslicer wine-agent --stop
 memslicer unfreeze [ID|all]
 memslicer stop                     stop the helper
 """
@@ -49,6 +51,9 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("table")
     p.add_argument("-p", "--process", help="process name/args substring (default: the table's 'process')")
     p.add_argument("--only", nargs="+", metavar="NAME")
+    p = sub.add_parser("wine-agent")
+    p.add_argument("game", nargs="?", help="game pid or name/exe substring")
+    p.add_argument("--stop", action="store_true")
     p = sub.add_parser("unfreeze")
     p.add_argument("id", nargs="?", default="all")
     sub.add_parser("stop")
@@ -86,6 +91,14 @@ def main(argv: list[str] | None = None) -> None:
             for r in client.call("apply_cheats", cheats=cheats, pointer_size=t.get("pointer_size")):
                 state = "ERROR " + r["error"] if "error" in r else ("frozen" if r.get("frozen") else "written")
                 print(f"  {r['name']}: {state}")
+        elif args.cmd == "wine-agent":
+            if args.stop:
+                print("stopped" if wine.stop_agent() else "agent was not running")
+            elif not args.game:
+                sys.exit("give the game's pid or name, e.g. memslicer wine-agent re3.exe")
+            else:
+                pid = int(args.game) if args.game.isdigit() else procs.find_process(args.game, uid=os.getuid())["pid"]
+                _print(wine.start_agent(pid))
         elif args.cmd == "unfreeze":
             _print(client.call("unfreeze", id=args.id))
         elif args.cmd == "stop":

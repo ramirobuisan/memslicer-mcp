@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 examples/demo_game
 examples/demo_game_x86
+wine-agent/msagent.exe

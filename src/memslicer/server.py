@@ -10,7 +10,7 @@ try:  # mcp >= 2
 except ImportError:  # mcp 1.x
     from mcp.server.fastmcp import FastMCP as _Server
 
-from . import procs, tables
+from . import procs, tables, wine
 from .client import HelperClient, HelperError, HelperUnavailable, start_hint
 
 Value = Union[int, float, str]
@@ -22,7 +22,8 @@ and Windows games under Wine / CrossOver / NotProton (and emulators running insi
 Workflow
 1. status. If the helper isn't running, give the user the sudo command from the error; you can't start it.
 2. list_processes(filter) -> attach(pid or name). For Wine games pick the process whose args contain the
-   game's .exe (usually the largest one). If attach fails, diagnose_process(pid) explains why.
+   game's .exe (usually the largest one). CrossOver/NotProton wine is hardened, so first start_wine_agent(name=
+   "Game.exe"), then attach (it falls back to the agent). If attach fails, diagnose_process(pid) explains why.
 3. Known value (HUD shows HP 100): scan_first(value_type="int32", value=100). Have the value change in game
    (ask the user, or use screenshots/keys if you can see the game), then scan_next(compare="eq", value=<new>).
    Repeat until a handful of results. If int32 finds nothing try float (tolerance=0.5 or compare="between"),
@@ -84,10 +85,28 @@ def diagnose_process(pid: int) -> dict:
 
 
 @mcp.tool()
-def attach(pid: int | None = None, name: str | None = None) -> dict:
+def attach(pid: int | None = None, name: str | None = None, backend: str = "auto") -> dict:
     """Attach to a process by pid, or by name/command-line substring (largest match wins). Detaches any previous
-    process and clears its scans and freezes."""
-    return _h("attach", pid=pid, name=name)
+    process and clears its scans and freezes. backend: auto (Mach, falling back to the Wine agent for hardened
+    CrossOver/NotProton processes), mach, or wine."""
+    return _h("attach", pid=pid, name=name, backend=backend)
+
+
+@mcp.tool()
+def start_wine_agent(pid: int | None = None, name: str | None = None) -> dict:
+    """Start msagent.exe inside a Wine game's prefix (needed for CrossOver/NotProton games: their wine binary is
+    hardened, so macOS blocks direct access). Give the game's macOS pid or a name like 're3.exe'. Then attach."""
+    if pid is None:
+        if not name:
+            raise RuntimeError("give the game's pid or name")
+        pid = procs.find_process(name, uid=os.getuid())["pid"]
+    return wine.start_agent(pid)
+
+
+@mcp.tool()
+def stop_wine_agent() -> dict:
+    """Stop the Wine agent (it also exits when its Wine prefix shuts down)."""
+    return {"stopped": wine.stop_agent()}
 
 
 @mcp.tool()

@@ -27,7 +27,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import __version__, mach, procs
+from . import __version__, mach, procs, wine
 from .engine import Freezer, ScanError, Session
 from .mach import MachError, Task
 from .values import parse_op, parse_type
@@ -66,6 +66,7 @@ class Api:
 
     def __init__(self, allowed_uid: int):
         self.allowed_uid = allowed_uid
+        self.home = pwd.getpwuid(allowed_uid).pw_dir
         self.session: Session | None = None
         self.freezer = Freezer()
         self.lock = threading.RLock()
@@ -84,6 +85,7 @@ class Api:
         s = self.session
         exe = s.module("$exe")
         return {"pid": s.pid, "name": mach.pid_name(s.pid), "paused": s.task.suspended,
+                "backend": "wine-agent" if isinstance(s.task, wine.WineTask) else "mach",
                 "exe": exe.name if exe else None, "pointer_size": s.default_pointer_size(),
                 "scan_results": s.scan.count if s.scan else None, "frozen": len(self.freezer.entries)}
 
@@ -105,7 +107,7 @@ class Api:
     def diagnose(self, pid: int) -> dict:
         return procs.diagnose(int(pid))
 
-    def attach(self, pid: int | None = None, name: str | None = None) -> dict:
+    def attach(self, pid: int | None = None, name: str | None = None, backend: str = "auto") -> dict:
         if pid is None:
             if not name:
                 raise ValueError("give a pid or a name to match")
@@ -118,10 +120,23 @@ class Api:
             raise PermissionError(f"pid {pid} belongs to uid {uid}; this helper only attaches to "
                                   f"processes of uid {self.allowed_uid}")
         self.detach()
-        try:
-            task = Task.for_pid(pid)
-        except MachError as e:
-            raise PermissionError(_attach_hint(pid, e)) from None
+        if backend not in ("auto", "mach", "wine"):
+            raise ValueError("backend must be auto, mach or wine")
+        task = None
+        if backend in ("auto", "mach"):
+            try:
+                task = Task.for_pid(pid)
+            except MachError as e:
+                is_wine = any(r.get("wine") for r in procs.list_processes() if r["pid"] == pid)
+                if backend == "mach" or not is_wine:
+                    raise PermissionError(_attach_hint(pid, e)) from None
+        if task is None:
+            # Hardened Wine (CrossOver/NotProton): go through msagent.exe inside the game's prefix.
+            try:
+                task = wine.attach(pid, home=self.home)
+            except (ConnectionError, LookupError, OSError) as e:
+                raise PermissionError(f"macOS refuses task_for_pid on this hardened Wine process, and the Wine "
+                                      f"agent isn't usable: {e}") from None
         self.session = Session(task)
         mods = self.session.modules()
         out = self._attached()

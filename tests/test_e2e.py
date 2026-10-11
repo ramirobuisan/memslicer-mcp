@@ -56,7 +56,7 @@ def test_helper_protocol(helper):
     res = c.call("scan_first", type="string", value=token)
     assert res["results"] >= 1
     first = c.call("scan_results", limit=1)["results"][0]
-    assert first["value"] == token
+    assert first["previous"] == token  # value at scan time; the live bytes may already be reused
 
     # The token lives in request buffers the helper reuses, so only the immediate read-back is stable.
     new = "MEMSLICER-" + token[10:]

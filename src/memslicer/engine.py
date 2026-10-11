@@ -94,7 +94,8 @@ class Session:
 
     def modules(self, refresh: bool = False) -> list[Module]:
         if self._modules is None or refresh:
-            self._modules = find_modules(self.task)
+            lister = getattr(self.task, "list_modules", None)
+            self._modules = lister() if lister else find_modules(self.task)
         return self._modules
 
     def module(self, name: str) -> Module | None:
