@@ -55,3 +55,15 @@ def test_tables(tmp_path, monkeypatch):
     assert t["process"] == "Game.exe" and len(t["cheats"]) == 1 and t["cheats"][0]["value"] == 1
     assert tables.list_tables()[0]["cheats"] == ["HP"]
     assert tables.remove("Some Game", "HP") and tables.load("Some Game")["cheats"] == []
+
+
+def test_offsets_never_trigger_module_lookups():
+    asked = []
+
+    def module_base(name):
+        asked.append(name)
+        return MODULES.get(name.lower())
+
+    evaluate("[[Game.exe+0x10]+0x8]+0x48", module_base=module_base, read_ptr=lambda a: MEMORY[a],
+             aob=lambda p, m: 0, read_i32=lambda a: 0)
+    assert asked == ["Game.exe"]

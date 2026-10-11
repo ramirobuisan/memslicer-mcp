@@ -25,10 +25,10 @@ class ExprError(ValueError):
 
 
 def quote_module(name: str) -> str:
-    return name if _PLAIN_NAME.fullmatch(name) and not _is_hex(name) else f'"{name}"'
+    return name if _PLAIN_NAME.fullmatch(name) and not is_hex(name) else f'"{name}"'
 
 
-def _is_hex(word: str) -> bool:
+def is_hex(word: str) -> bool:
     w = word[2:] if word.lower().startswith("0x") else word
     return bool(w) and all(c in "0123456789abcdefABCDEF" for c in w)
 
@@ -112,10 +112,12 @@ class _Parser:
         if kind == "word":
             if self.peek() == "(":
                 return self.call(tok.lower())
+            if tok[:2].lower() == "0x" and is_hex(tok):
+                return int(tok, 16)
             base = self.module_base(tok)
             if base is not None:
                 return base
-            if _is_hex(tok):
+            if is_hex(tok):
                 return int(tok, 16)
             raise ExprError(f"unknown module or bad number {tok!r}")
         raise ExprError(f"unexpected {tok!r} in {self.text!r}")

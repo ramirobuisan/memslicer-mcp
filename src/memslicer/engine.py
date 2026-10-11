@@ -98,9 +98,9 @@ class Session:
             self._modules = lister() if lister else find_modules(self.task)
         return self._modules
 
-    def module(self, name: str) -> Module | None:
+    def module(self, name: str, refresh_on_miss: bool = True) -> Module | None:
         key = name.lower()
-        for refresh in (False, True):
+        for refresh in ((False, True) if refresh_on_miss else (False,)):
             mods = self.modules(refresh)
             if key == "$exe":
                 # A Windows exe (Wine game) wins; otherwise the Mach-O at the process's own path,
@@ -141,7 +141,9 @@ class Session:
         ps = pointer_size or self.default_pointer_size()
 
         def module_base(name):
-            m = self.module(name)
+            # Hex-looking words are almost always offsets: never re-list modules for them (that is a
+            # full module walk, slow through Wine, and would run on every freeze tick).
+            m = self.module(name, refresh_on_miss=not expr_mod.is_hex(name))
             return m.base if m else None
 
         def read_i32(a):
